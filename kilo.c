@@ -15,6 +15,7 @@
 #include <sys/ioctl.h>
 #include <time.h>
 #include <stdarg.h>
+#include <malloc.h>
 /*** defines ***/
 
 #define KILO_VERSION "0.0.1"
@@ -35,6 +36,7 @@ enum editorKey {
 };
 
 void editorClearScreen();
+void editorSetStatusMessage(const char * format, ...);
 
 /*** data ***/
 
@@ -254,6 +256,25 @@ void editorAppendRow(char *s, size_t len) {
 	E.numrows++;
 }
 
+void editorRowInsertChar(erow *row, int at, int c) {
+	if (at < 0 || at > row->size) at = row->size;	
+	row->chars = realloc(row->chars, row->size + 2); // add two, because the actual length of the buffer (NOT the size value) 
+													 //	also includes the null byte to terminate the string			
+	memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
+	row->size++;
+	row->chars[at] = c;		
+	editorUpdateRow(row);
+}
+
+/*** editor operations ***/
+void editorInsertChar(int c) {
+	if (E.cy == E.numrows) {
+		editorAppendRow("", 0);
+	}
+	editorRowInsertChar(&E.row[E.cy], E.cx, c);
+	E.cx++;
+}
+
 /*** file i/o ***/
 
 void editorOpen(char *filename) {
@@ -351,8 +372,10 @@ void editorProcessKeypress() {
 		case END_KEY:
 			if (E.cy < E.numrows) {
 				E.cx = E.row[E.cy].size;	
-			}
-			
+			}			
+			break;
+		default:
+			editorInsertChar(c);
 			break;
 	}
 }
@@ -532,8 +555,11 @@ int main(int argc, char *argv[]) {
 		else {
 			printf("%d ('%c')\r\n", c, c);
 		}
-		if (c == CTRL_KEY('q')) break;
-		*/
+		if (c == CTRL_KEY('q')) break;*/
+		
 	}
 	return 0;
 }
+
+
+
