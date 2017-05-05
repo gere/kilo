@@ -16,6 +16,7 @@
 #include <time.h>
 #include <stdarg.h>
 #include <malloc.h>
+#include <fcntl.h>
 /*** defines ***/
 
 #define KILO_VERSION "0.0.1"
@@ -24,6 +25,7 @@
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 enum editorKey {
+	BACKSPACE = 127,
 	ARROW_LEFT = 1000,
 	ARROW_RIGHT,
 	ARROW_UP,
@@ -35,6 +37,7 @@ enum editorKey {
 	DEL_KEY
 };
 
+/*** prototypes ***/ 
 void editorClearScreen();
 void editorSetStatusMessage(const char * format, ...);
 
@@ -55,6 +58,7 @@ struct editorConfig {
 	int screenrows;
 	int screencols;
 	int numrows;
+	int dirty; /* file modified but saved */
 	erow *row;
 	char *filename;
 	char statusmsg[80];
@@ -254,16 +258,18 @@ void editorAppendRow(char *s, size_t len) {
 	editorUpdateRow(&E.row[at]);
 
 	E.numrows++;
+	E.dirty++;
 }
 
 void editorRowInsertChar(erow *row, int at, int c) {
 	if (at < 0 || at > row->size) at = row->size;	
 	row->chars = realloc(row->chars, row->size + 2); // add two, because the actual length of the buffer (NOT the size value) 
 													 //	also includes the null byte to terminate the string			
-	memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
+	memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1); // memmove must be used insted of memcpy if the memory area overlap
 	row->size++;
 	row->chars[at] = c;		
 	editorUpdateRow(row);
+	E.dirty++;
 }
 
 /*** editor operations ***/
@@ -276,6 +282,30 @@ void editorInsertChar(int c) {
 }
 
 /*** file i/o ***/
+
+/**
+ * concatenete the rows in a string ready to be saved
+ * @param  buflen pointer to int, to return the length of the buffer to caller
+ * @return   buffer of chars, ready to be saved
+ */
+char* editorRowsToString(int *buflen) {
+	int totlen = 0;
+	int j;
+	for (j = 0; j < E.numrows; ++j)	{
+		totlen += E.row[j].size + 1; // add one to make room for the new line char
+	}
+	*buflen = totlen;
+
+	char *buf = malloc(totlen);
+	char *p = buf;
+	for (j = 0; j < E.numrows; j++) {
+		memcpy(p, E.row[j].chars, E.row[j].size);
+		p += E.row[j].size;
+		*p = '\n';
+		p++;
+	}
+	return buf;
+}
 
 void editorOpen(char *filename) {
 	E.filename = strdup(filename);
@@ -291,11 +321,32 @@ void editorOpen(char *filename) {
 			linelen--;
 		editorAppendRow(line, linelen);
 	}
+	E.dirty = 0;
 	free(line);
 	fclose(fp);
+}
 
+void editorSave() {
+	if (E.filename == NULL) return;
 	
+	int len;
+	char *buf = editorRowsToString(&len);
 
+	int fd = open(E.filename, O_RDWR | O_CREAT, 0644);
+	if (fd != -1) {
+		if (ftruncate(fd, len) != -1) {
+			if (write(fd, buf, len) == len) {
+				close(fd);
+				free(buf);
+				E.dirty = 0;
+				editorSetStatusMessage("%d bytes written to disk", len);
+				return;
+			}
+		}
+		close(fd);
+	}
+	free(buf);
+	editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
 }
 
 /*** input ***/
@@ -342,6 +393,9 @@ void editorMoveCursor(int key) {
 void editorProcessKeypress() {
 	int c = editorReadKey();
 	switch (c) {
+		case '\r': 
+			//TODO
+			break;
 		case CTRL_KEY('q'):			
 			editorClearScreen();			
 			exit(0);
@@ -374,6 +428,21 @@ void editorProcessKeypress() {
 				E.cx = E.row[E.cy].size;	
 			}			
 			break;
+
+		case BACKSPACE:
+		case CTRL_KEY('h'):
+		case DEL_KEY:
+			//TODO
+			break;
+
+		case CTRL_KEY('l'):
+		case '\x1b':
+			//TODO
+			break;
+		case CTRL_KEY('s'):
+			editorSave();
+			break;
+
 		default:
 			editorInsertChar(c);
 			break;
@@ -443,8 +512,9 @@ void editorDrawStatusBar(struct abuf *ab) {
 	abAppend(ab, "\x1b[7m", 4); //invert colors
 	
 	char status[80], rstatus[80];
-	int len = snprintf(status, sizeof(status), "%.20s - %d lines",
-		E.filename ? E.filename : "[No name]", E.numrows);
+	int len = snprintf(status, sizeof(status), "%.20s - %d lines %s",
+		E.filename ? E.filename : "[No name]", E.numrows,
+		E.dirty > 0 ? "(modified)" : "");
 
 	int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d",
 		E.cy + 1, E.numrows);
@@ -524,6 +594,7 @@ void initEditor() {
 	E.coloff = 0;
 	E.numrows = 0;
 	E.row = 0;
+	E.dirty = 0;
 	E.filename = NULL;
 	E.statusmsg[0] = '\0';
 	E.statusmsg_time = 0;
@@ -542,7 +613,7 @@ int main(int argc, char *argv[]) {
 	if (argc >= 2)
 		editorOpen(argv[1]);
 	
-	editorSetStatusMessage("HELP: Ctrl-Q = quit");
+	editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit");
 
 	while (1) {
 		editorRefreshScreen();
