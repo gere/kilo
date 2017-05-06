@@ -21,6 +21,7 @@
 
 #define KILO_VERSION "0.0.1"
 #define KILO_TAB_STOP 4
+#define KILO_QUIT_TIMES 3
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
@@ -239,15 +240,15 @@ void editorUpdateRow(erow *row) {
 	}
 	row->render[idx] = '\0';
 	row->rsize = idx;
-
-
 }
 
 
-void editorAppendRow(char *s, size_t len) {
-	E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+void editorInsertRow(int at, char *s, size_t len) {
+	if (at < 0 || at > E.numrows) return;
 
-	int at = E.numrows;
+	E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+	memmove(&E.row[at + 1], &E.row[at], sizeof(erow) * (E.numrows - at));
+		
 	E.row[at].size = len;
 	E.row[at].chars = malloc(len + 1);
 	memcpy(E.row[at].chars, s, len);
@@ -261,6 +262,20 @@ void editorAppendRow(char *s, size_t len) {
 	E.dirty++;
 }
 
+void editorFreeRow(erow *row) {
+	free(row->render);
+	free(row->chars);
+}
+
+void editorDelRow(int at) {
+	if (at < 0 || at >= E.numrows) return;
+	editorFreeRow(&E.row[at]);
+	memmove(&E.row[at], &E.row[at + 1], sizeof(erow) * (E.numrows - at - 1));
+	E.numrows--;
+	E.dirty++;
+}
+
+
 void editorRowInsertChar(erow *row, int at, int c) {
 	if (at < 0 || at > row->size) at = row->size;	
 	row->chars = realloc(row->chars, row->size + 2); // add two, because the actual length of the buffer (NOT the size value) 
@@ -272,14 +287,65 @@ void editorRowInsertChar(erow *row, int at, int c) {
 	E.dirty++;
 }
 
+void editorRowAppendString(erow *row, char *s, size_t len) {
+	row->chars = realloc(row->chars, row->size +len + 1);
+	memcpy(&row->chars[row->size], s, len);
+	row->size += len;
+	row->chars[row->size] = '\0';
+	editorUpdateRow(row);
+	E.dirty++;
+}
+
+void editorRowDeleteChar(erow *row, int at) {
+	if (at < 0 || at >= row->size) return;
+	memmove(&row->chars[at], &row->chars[at + 1], row->size - at);
+	row->size--;
+	editorUpdateRow(row);
+	E.dirty++;
+}
+
 /*** editor operations ***/
 void editorInsertChar(int c) {
 	if (E.cy == E.numrows) {
-		editorAppendRow("", 0);
+		editorInsertRow(E.numrows, "", 0);
 	}
 	editorRowInsertChar(&E.row[E.cy], E.cx, c);
 	E.cx++;
 }
+
+void editorInsertNewline() {
+	if (E.cx == 0) {
+		editorInsertRow(E.cy, "", 0);
+	}
+	else {
+		erow *row = &E.row[E.cy];
+		editorInsertRow(E.cy + 1, &row->chars[E.cx], row->size - E.cx);
+		row = &E.row[E.cy];
+		row->size = E.cx;		
+		row->chars[row->size] = '\0';
+		editorUpdateRow(row);
+	}
+	E.cy++;
+	E.cx = 0;
+}
+
+void editorDelChar() {
+	if (E.cy == E.numrows) return; // last line
+	if (E.cx == 0 && E.cy == 0) return; // beginning of the file
+
+	erow *row = &E.row[E.cy];
+	if (E.cx > 0) {
+		editorRowDeleteChar(row, E.cx - 1);
+		E.cx--;
+	}
+	else {
+		E.cx = E.row[E.cy - 1].size;
+		editorRowAppendString(&E.row[E.cy - 1], row->chars, row->size);
+		editorDelRow(E.cy);
+		E.cy--;
+	}
+}
+
 
 /*** file i/o ***/
 
@@ -319,7 +385,7 @@ void editorOpen(char *filename) {
 		while (linelen > 0 && (line[linelen - 1] == '\r' ||
 							  line[linelen - 1] == '\n'))
 			linelen--;
-		editorAppendRow(line, linelen);
+		editorInsertRow(E.numrows, line, linelen);
 	}
 	E.dirty = 0;
 	free(line);
@@ -391,14 +457,23 @@ void editorMoveCursor(int key) {
 }
 
 void editorProcessKeypress() {
+	static int quit_times = KILO_QUIT_TIMES;
+
 	int c = editorReadKey();
 	switch (c) {
 		case '\r': 
-			//TODO
+			editorInsertNewline();
 			break;
-		case CTRL_KEY('q'):			
-			editorClearScreen();			
+		case CTRL_KEY('q'):	{		
+			if (E.dirty && quit_times > 0) {
+				editorSetStatusMessage("Warning! File has unsaved changes. " 
+					"Press Ctrl-Q %d more times to quit.\n", quit_times);
+				quit_times--;
+				return;
+			}	
+			editorClearScreen();
 			exit(0);
+			}
 			break;
 		case ARROW_UP:
 		case ARROW_DOWN:
@@ -432,7 +507,8 @@ void editorProcessKeypress() {
 		case BACKSPACE:
 		case CTRL_KEY('h'):
 		case DEL_KEY:
-			//TODO
+			if (c == DEL_KEY) editorMoveCursor(ARROW_RIGHT);
+			editorDelChar();
 			break;
 
 		case CTRL_KEY('l'):
@@ -445,8 +521,9 @@ void editorProcessKeypress() {
 
 		default:
 			editorInsertChar(c);
-			break;
+			break;		
 	}
+	quit_times = KILO_QUIT_TIMES;
 }
 
 /*** output ***/
