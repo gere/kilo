@@ -38,11 +38,18 @@ enum editorKey {
 	DEL_KEY
 };
 
+enum editorHiglight {
+	HL_NORMAL = 0,
+	HL_NUMBER
+};
+
 /*** prototypes ***/ 
+
 void editorClearScreen();
 void editorSetStatusMessage(const char * format, ...);
 void editorRefreshScreen();
 char *editorPrompt(char *prompt, void (*callback)(char *, int));
+
 /*** data ***/
 
 typedef struct erow {
@@ -50,6 +57,8 @@ typedef struct erow {
 	int rsize;
 	char *chars;
 	char *render;
+	unsigned char *hl; 	// highlight: each value correspond to a char in render 
+					   	// and will tell if the character is part of a string, a comment, a number, ect
 } erow;
 
 struct editorConfig {
@@ -204,6 +213,26 @@ int getWindowSize(int *rows, int *cols) {
 	}
 }
 
+/*** syntax highlighting ***/
+void editorUpdateSyntax(erow *row) {
+	row->hl = realloc(row->hl, row->rsize);
+	memset(row->hl, HL_NORMAL, row->rsize);
+
+	int i;
+	for (i = 0; i < row->rsize; i++) {
+		if (isdigit(row->render[i])) {
+			row->hl[i] = HL_NUMBER;
+		}
+	}
+}
+
+int editorSyntaxToColor(int hl) {
+	switch(hl) {
+		case HL_NUMBER: return 196;
+		default: return 37;
+	}
+}
+
 /*** row operations ***/
 /*
  * Character index to render index
@@ -259,6 +288,8 @@ void editorUpdateRow(erow *row) {
 	}
 	row->render[idx] = '\0';
 	row->rsize = idx;
+
+	editorUpdateSyntax(row);
 }
 
 
@@ -274,6 +305,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 	E.row[at].chars[len] = '\0';
 	E.row[at].rsize = 0;
 	E.row[at].render = NULL;
+	E.row[at].hl = NULL;
 
 	editorUpdateRow(&E.row[at]);
 
@@ -284,6 +316,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 void editorFreeRow(erow *row) {
 	free(row->render);
 	free(row->chars);
+	free(row->hl);
 }
 
 void editorDelRow(int at) {
@@ -683,8 +716,10 @@ void editorScroll() {
 void editorDrawRows(struct abuf *ab) {
 	int y;
 	for (y = 0; y < E.screenrows; ++y){
-		int filerow = y + E.rowoff;
+		int filerow = y + E.rowoff;		
+		// if we are after the end of the file
 		if (filerow >= E.numrows) {
+			// if there are no rows
 			if (E.numrows == 0 && y == E.screenrows / 3) {
 				char welcome[80];
 				int welcomelen = snprintf(welcome, sizeof(welcome),
@@ -704,7 +739,32 @@ void editorDrawRows(struct abuf *ab) {
 			int len = E.row[filerow].rsize - E.coloff;
 			if (len < 0) len = 0;
 			if (len > E.screencols) len = E.screencols;
-			abAppend(ab, &E.row[filerow].render[E.coloff], len);
+
+			
+			char *c  =  &E.row[filerow].render[E.coloff];
+			unsigned char *hl =  &E.row[filerow].hl[E.coloff];
+			int current_color = HL_NORMAL;
+			int j;
+			for (j = 0; j < len; j++) {
+				if (hl[j] == HL_NORMAL) {
+					if (current_color != HL_NORMAL) {
+						abAppend(ab, "\x1b[39m", 5);
+						current_color = HL_NORMAL;
+					}
+					abAppend(ab, &c[j], 1);
+				} else {
+					int color = editorSyntaxToColor(hl[j]);
+					if (current_color != color) {
+						char buf[16];
+						int clen = snprintf(buf, sizeof(buf), "\x1b[38;5;%dm", color);
+						abAppend(ab, "\x1b[38;5;196m", clen); //https://en.wikipedia.org/wiki/ANSI_escape_code#Colors						
+						current_color = color;
+					}	
+					abAppend(ab, &c[j], 1);				
+				}
+			}
+			abAppend(ab, "\x1b[39m", 5);
+			
 		}
 
 		abAppend(ab, "\x1b[K", 3); //Erase in Line http://vt100.net/docs/vt100-ug/chapter3.html#EL
