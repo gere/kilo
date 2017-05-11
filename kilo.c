@@ -334,8 +334,11 @@ void editorUpdateSyntax(erow *row) {
 					i += klen;
 					break;
 				}
-
 				j++;
+			}
+			if (keyword != NULL) {
+				prev_sep = 0;
+				continue;
 			}
 		}
 
