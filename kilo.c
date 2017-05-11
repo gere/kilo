@@ -43,7 +43,9 @@ enum editorHiglight {
 	HL_STRING,
 	HL_NUMBER,
 	HL_MATCH,  //search match
-	HL_COMMENT
+	HL_COMMENT,
+	HL_KEYWORD1,
+	HL_KEYWORD2
 };
 
 #define HL_HIGHLIGHT_NUMBERS (1<<0)
@@ -87,6 +89,8 @@ struct editorConfig {
 struct editorSyntax {
 	char *filetype;
 	char **filematch; // array of strings. Each string contains a pattern to match a filename agains.
+	char **keywords;
+
 	char *singleline_comment_start;
 	int flags;
 };
@@ -94,14 +98,23 @@ struct editorSyntax {
 struct editorConfig E;
 
 /*** filetypes ***/
+/* NOTE: NULL terminated arrays are great to loop trough them with a while */ 
+char *C_HL_extensions[] = { ".c", ".h", ".cpp", NULL }; 
 
-char *C_HL_extensions[] = { ".c", ".h", ".cpp", NULL };
+// the pipe terminated keywords are the second type of keyword
+char *C_HL_keywords[] = {
+  "switch", "if", "while", "for", "break", "continue", "return", "else",
+  "struct", "union", "typedef", "static", "enum", "class", "case",
+  "int|", "long|", "double|", "float|", "char|", "unsigned|", "signed|",
+  "void|", NULL //GREAT NULL terminated array
+};
 
 struct editorSyntax HLDB[] = {
 	{
 		"c",
 		C_HL_extensions,
-		"//",
+		C_HL_keywords,
+		"//",		
 		HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS
 	},
 };
@@ -253,6 +266,8 @@ void editorUpdateSyntax(erow *row) {
 
 	if (E.syntax == NULL) return; // no syntax no party
 
+	char **keywords = E.syntax->keywords;
+
 	char *scs = E.syntax->singleline_comment_start;
 	int scs_len = scs ? strlen(scs) : 0;
 
@@ -304,7 +319,28 @@ void editorUpdateSyntax(erow *row) {
 				continue;
 			}
 		}
-		prev_sep = is_separator(c);
+
+		if (prev_sep) {
+			int j = 0;
+			char *keyword;
+			while ((keyword = keywords[j])) {
+				int klen = strlen(keyword);
+				int is_kw2 = keyword[klen - 1] == '|';
+				if (is_kw2) klen--;
+
+				if (!strncmp(&row->render[i], keyword, klen) &&
+					is_separator(row->render[i + klen])) {
+					memset(&row->hl[i], is_kw2 ? HL_KEYWORD2 : HL_KEYWORD1, klen);
+					i += klen;
+					break;
+				}
+
+				j++;
+			}
+		}
+
+
+		prev_sep = is_separator(c); 
 		i++;
 	}
 }
@@ -315,6 +351,10 @@ int editorSyntaxToColor(int hl) {
 		case HL_STRING: return 5;
 		case HL_MATCH: return 27;
 		case HL_COMMENT: return 6;
+		case HL_KEYWORD1: return 11;
+		case HL_KEYWORD2: return 10;
+		
+
 		default: return 37;
 	}
 }
@@ -324,7 +364,6 @@ void editorSelectSyntaxHighlight() {
 	if (E.filename == NULL) return;
 
 	char *ext = strrchr(E.filename, '.');
-
 	for (unsigned int j = 0; j < HLDB_ENTRIES; j++) {
 		struct editorSyntax *s = &HLDB[j];
 		unsigned int i = 0;
