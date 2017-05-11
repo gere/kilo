@@ -40,11 +40,13 @@ enum editorKey {
 
 enum editorHiglight {
 	HL_NORMAL = 0,
+	HL_STRING,
 	HL_NUMBER,
 	HL_MATCH,  //search match
 };
 
 #define HL_HIGHLIGHT_NUMBERS (1<<0)
+#define HL_HIGHLIGHT_STRINGS (1<<1)
 
 /*** prototypes ***/ 
 
@@ -97,7 +99,7 @@ struct editorSyntax HLDB[] = {
 	{
 		"c",
 		C_HL_extensions,
-		HL_HIGHLIGHT_NUMBERS
+		HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS
 	},
 };
 
@@ -249,11 +251,35 @@ void editorUpdateSyntax(erow *row) {
 	if (E.syntax == NULL) return; // no syntax no party
 
 	int prev_sep = 1; // initialized to true because the beginning of the line is a separator
+	int in_string = 0;
 
 	int i = 0;
 	while (i < row->rsize) {
 		char c = row->render[i];
 		unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;
+
+		if (E.syntax->flags & HL_HIGHLIGHT_STRINGS) {
+			if (in_string) {
+				row->hl[i] = HL_STRING;
+				if (c == '\\' && i + 1 < row->rsize) {
+					row->hl[i + 1] = HL_STRING;
+					i += 2;
+					continue;
+				}
+				if (c == in_string) in_string = 0; //in_string is equal to " or ', so, if it's a match, it's a closing quote 
+				i++;
+				prev_sep = 1;
+				continue;
+			}
+			else {
+				if (c == '"' || c == '\'') {
+					in_string = c;
+					row->hl[i] = HL_STRING;
+					i++;
+					continue;
+				}
+			}
+		}
 
 		if (E.syntax->flags & HL_HIGHLIGHT_NUMBERS) {
 			//TODO: maybe use a regular expression instead of this?
@@ -273,6 +299,7 @@ void editorUpdateSyntax(erow *row) {
 int editorSyntaxToColor(int hl) {
 	switch(hl) {
 		case HL_NUMBER: return 196;
+		case HL_STRING: return 5;
 		case HL_MATCH: return 27;
 		default: return 37;
 	}
