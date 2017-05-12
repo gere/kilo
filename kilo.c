@@ -923,7 +923,20 @@ void editorDrawRows(struct abuf *ab) {
 			int current_color = HL_NORMAL;
 			int j;
 			for (j = 0; j < len; j++) {
-				if (hl[j] == HL_NORMAL) {
+
+				if (iscntrl(c[j])) {
+					// to print an A for Ctrl+A we add the value of the ctrl char to @ that is the char just before capitals letter in ASCII 
+					char sym = (c[j] <= 26) ? '@' + c[j] : '?'; 
+					abAppend(ab, "\x1b[7m", 4);
+					abAppend(ab, &sym, 1);
+					abAppend(ab, "\x1b[m", 3);
+					if (current_color != HL_NORMAL) {
+						char buf[16];
+						int clen = snprintf(buf, sizeof(buf), "\x1b[38;5;%dm", current_color);
+						abAppend(ab, buf, clen);
+					}
+				}
+				else if (hl[j] == HL_NORMAL) {
 					if (current_color != HL_NORMAL) {
 						abAppend(ab, "\x1b[39m", 5);
 						current_color = HL_NORMAL;
