@@ -1,3 +1,16 @@
+/**
+ * Kilo editor, in c. 
+ *
+ * Useful link:
+ * 	original version: 				https://github.com/antirez/kilo
+ * 	tutorial: 						http://viewsourcecode.org/snaptoken/kilo/index.html
+ * 	ANSI escape code and colors:	https://en.wikipedia.org/wiki/ANSI_escape_code
+ * 	VT 100 terminal escape codes:	http://vt100.net/docs/vt100-ug/chapter3.html
+ * 	Feature test macros:			https://www.gnu.org/software/libc/manual/html_node/Feature-Test-Macros.html
+ * 			
+ */
+
+
 /*** includes ***/
 
 #define _DEFAULT_SOURCE
